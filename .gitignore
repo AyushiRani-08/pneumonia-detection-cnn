@@ -1,0 +1,40 @@
+# ── Large model files (use Google Drive link in README instead) ──
+*.keras
+*.h5
+*.pkl
+*.pb
+
+# ── Dataset files (too large, download separately via Kaggle) ──
+chest_ray/
+chest_xray/
+*.zip
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+
+# ── Jupyter ──
+.ipynb_checkpoints/
+
+# ── Streamlit ──
+.streamlit/secrets.toml
+
+# ── OS-specific junk ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE / editor ──
+.vscode/
+.idea/
+*.swp
+
+# ── Colab leftovers ──
+sample_data/
