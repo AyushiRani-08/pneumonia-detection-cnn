@@ -69,7 +69,8 @@ Grad-CAM heatmaps highlight the image regions most responsible for each predicti
 ```
 pneumonia-detection-cnn/
 ├── notebooks/
-│   └── pneumonia_detection.ipynb     # Full training + evaluation pipeline
+│   ├── 01_eda_preprocessing.ipynb
+│   └── 02_training_evaluation.ipynb   
 ├── results/
 │   ├── confusion_matrix.png
 │   ├── roc_curve.png
