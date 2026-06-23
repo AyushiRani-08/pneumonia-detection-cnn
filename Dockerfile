@@ -16,11 +16,15 @@ RUN useradd -m -u 1000 user
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH
 
+# FIX: Tell Streamlit to use a directory the 'user' has write access to
+ENV STREAMLIT_SERVER_UPLOAD_FILE_DIR=/home/user/tmp
+
 # Copy requirements and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Switch ownership of the working directory to the non-root user
+# Create the temp upload directory and switch ownership of the working directory
+RUN mkdir -p /home/user/tmp && chown -R user:user /home/user/tmp /app
 COPY --chown=user . .
 
 # Switch to the non-root user environment
