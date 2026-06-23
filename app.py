@@ -60,38 +60,50 @@ class_names = ['No Pneumonia', 'Yes Pneumonia']
 @st.cache_resource
 def cached_grad_model():
     """
-    Safely isolates the feature extraction layer (block5_conv3) 
-    and output layers directly from the compiled top-level functional model.
+    Safely isolates the internal feature extraction layer (block5_conv3)
+    and the final output of the VGG16 backbone model itself.
     """
-    # 1. Target the final convolutional layer of the VGG16 backbone
     vgg_backbone = model.get_layer('vgg16')
     target_layer = vgg_backbone.get_layer('block5_conv3')
     
-    # 2. Build a new functional wrapper map using the top-level inputs 
-    # to yield both the activation maps and the final classification head outputs
-    grad_model = tf.keras.models.Model(
-        inputs=model.inputs,
-        outputs=[target_layer.output, model.output]
+    # Construct the model strictly using the backbone's local graph boundaries
+    vgg_grad_model = tf.keras.models.Model(
+        inputs=vgg_backbone.inputs,
+        outputs=[target_layer.output, vgg_backbone.output]
     )
-    return grad_model
+    return vgg_grad_model
 
 
 def make_gradcam_heatmap(img_array, grad_model, pred_index=None):
+    # Retrieve the top-level layers from our manual architecture
+    flatten_layer = model.get_layer('flatten_6')
+    dense_layer = model.get_layer('dense_6')
+
     with tf.GradientTape() as tape:
-        conv_outputs, predictions = grad_model(img_array)
+        # 1. Forward pass through the backbone to get feature maps
+        conv_outputs, vgg_output = grad_model(img_array)
+        
+        # 2. Forward pass through the rest of the classification head manually
+        # This keeps the symbolic gradient path unbroken across sub-graphs!
+        x = flatten_layer(vgg_output)
+        predictions = dense_layer(x)
+        
         if pred_index is None:
             pred_index = tf.argmax(predictions[0])
         class_channel = predictions[:, pred_index]
 
-    # Compute gradients with respect to target feature map
+    # Compute gradients of the class score with respect to target conv layer activations
     grads = tape.gradient(class_channel, conv_outputs)
+    
+    # Global average pooling of the gradients
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
     
+    # Weight the channels by the pooled gradients
     conv_outputs = conv_outputs[0]
     heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
     heatmap = tf.squeeze(heatmap)
     
-    # ReLU-like gating of features
+    # Apply ReLU gating and normalization
     heatmap = tf.maximum(heatmap, 0) / (tf.math.reduce_max(heatmap) + 1e-8)
     return heatmap.numpy(), int(pred_index), predictions.numpy()[0]
 
