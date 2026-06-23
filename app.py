@@ -1,14 +1,15 @@
 # ============================================================
 # Streamlit Demo — Pneumonia Detection from Chest X-Rays
-# Run locally with: streamlit run app.py
 # ============================================================
 
+import os
 import streamlit as st
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 from PIL import Image
 import cv2
+import gdown
 
 # ── Page config ────────────────────────────────────────────
 st.set_page_config(
@@ -17,25 +18,38 @@ st.set_page_config(
     layout="centered"
 )
 
-# ── Load model (cached so it only loads once, not on every interaction) ──
+# ── Auto-download model from Google Drive ──────────────────
+MODEL_PATH = 'pneumonia_model.keras'
+DRIVE_FILE_ID = '1TJwx7F4ZS-ZEs8EPjkZCpplJjrsKIGUo'
+
+if not os.path.exists(MODEL_PATH):
+    with st.spinner("Downloading model... (first load only, ~60 seconds)"):
+        gdown.download(id=DRIVE_FILE_ID, output=MODEL_PATH, quiet=False)
+
+# ── Load model ─────────────────────────────────────────────
 @st.cache_resource
 def get_model():
-    model = load_model('pneumonia_model.keras')
+    model = load_model(MODEL_PATH)
     return model
 
 model = get_model()
-
 class_names = ['No Pneumonia', 'Yes Pneumonia']
 
 
-# ── Grad-CAM helper functions ───────────────────────────────
-def get_gradcam_components(model):
-    """Build the flat grad-cam model once (cached separately from main model)."""
+# ── Grad-CAM ───────────────────────────────────────────────
+@st.cache_resource
+def cached_grad_model():
     vgg_submodel = model.get_layer('vgg16')
     flat_input = vgg_submodel.input
     flat_vgg_output = vgg_submodel.output
 
-    extra_layers = [l for l in model.layers if l.name in ['flatten_6', 'dense_6']]
+    # Dynamic layer names — works regardless of Keras auto-numbering
+    extra_layers = [
+        l for l in model.layers
+        if isinstance(l, (tf.keras.layers.Flatten, tf.keras.layers.Dense))
+        and 'augmentation' not in l.name
+    ]
+
     x = flat_vgg_output
     for layer in extra_layers:
         x = layer(x)
@@ -46,11 +60,6 @@ def get_gradcam_components(model):
         outputs=[flat_model.get_layer('block5_conv3').output, flat_model.output]
     )
     return grad_model
-
-
-@st.cache_resource
-def cached_grad_model():
-    return get_gradcam_components(model)
 
 
 def make_gradcam_heatmap(img_array, grad_model, pred_index=None):
@@ -85,7 +94,7 @@ def preprocess_image(uploaded_image):
     return img_array
 
 
-# ── UI ───────────────────────────────────────────────────────
+# ── UI ──────────────────────────────────────────────────────
 st.title("🫁 Pneumonia Detection from Chest X-Rays")
 st.markdown(
     "Upload a chest X-ray image to get a prediction, confidence score, "
@@ -113,20 +122,17 @@ if uploaded_file is not None:
 
     confidence = probs[pred_class] * 100
 
-    # ── Display results side by side ──
     col1, col2 = st.columns(2)
     with col1:
         st.image(img_array, caption="Original X-ray", use_container_width=True)
     with col2:
         st.image(overlaid, caption="Grad-CAM — model attention", use_container_width=True)
 
-    # ── Prediction result ──
     if pred_class == 1:
         st.error(f"**Prediction: {class_names[pred_class]}** ({confidence:.1f}% confidence)")
     else:
         st.success(f"**Prediction: {class_names[pred_class]}** ({confidence:.1f}% confidence)")
 
-    # ── Probability breakdown ──
     st.subheader("Confidence breakdown")
     st.progress(float(probs[0]), text=f"No Pneumonia: {probs[0]*100:.1f}%")
     st.progress(float(probs[1]), text=f"Pneumonia: {probs[1]*100:.1f}%")
@@ -135,9 +141,8 @@ if uploaded_file is not None:
         st.markdown(
             "Red/yellow regions show where the model focused most when making "
             "its prediction. Blue regions had little influence. This does not "
-            "confirm specific clinical findings (e.g. consolidation) — it only "
-            "shows the model's attention pattern, used here as a sanity check "
-            "against the model relying on irrelevant image artifacts."
+            "confirm specific clinical findings — it only shows the model's "
+            "attention pattern as a sanity check against spurious shortcuts."
         )
 else:
     st.info("👆 Upload a chest X-ray image to get started")
@@ -145,5 +150,5 @@ else:
 st.markdown("---")
 st.caption(
     "Model: VGG16 transfer learning · Test AUC-ROC: 0.959 · "
-    "[GitHub repo](#) · Built as part of an AI for Medical Imaging coursework project"
+    "Built as part of an AI for Medical Imaging coursework project"
 )
