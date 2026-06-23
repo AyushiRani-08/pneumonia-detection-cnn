@@ -39,7 +39,6 @@ def get_model():
         
         # 2. Build the exact VGG16 backbone structure used during training
         vgg_base = VGG16(weights=None, include_top=False, input_shape=(150, 150, 3))
-        vgg_base.name = 'vgg16'
         
         # 3. Re-link the sequential connections matching your config log
         x = vgg_base(inputs, training=False)
@@ -170,4 +169,4 @@ st.markdown("---")
 st.caption(
     "Model: VGG16 transfer learning · Test AUC-ROC: 0.959 · "
     "Built as part of an AI for Medical Imaging coursework project"
-) 
+)
