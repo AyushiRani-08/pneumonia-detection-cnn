@@ -1,3 +1,12 @@
+---
+title: Pneumonia Detection
+emoji: 🫁
+colorFrom: blue
+colorTo: red
+sdk: docker
+app_port: 8501
+pinned: false
+---
 # Pneumonia Detection from Chest X-Rays using CNN Transfer Learning
 
 An end-to-end deep learning pipeline that classifies chest X-ray images as **Normal** or **Pneumonia**, built using transfer learning (VGG16) with class-weighted training, complete clinical evaluation metrics, and Grad-CAM explainability.
