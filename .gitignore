@@ -1,5 +1,5 @@
 # ── Large model files (use Google Drive link in README instead) ──
-*.keras
+
 *.h5
 *.pkl
 *.pb

@@ -9,7 +9,6 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model
 from PIL import Image
 import cv2
-import gdown
 
 # ── Page config ────────────────────────────────────────────
 st.set_page_config(
@@ -18,17 +17,12 @@ st.set_page_config(
     layout="centered"
 )
 
-# ── Auto-download model from Google Drive ──────────────────
+# ── Load model directly from repo ──────────────────────────
 MODEL_PATH = 'pneumonia_model.keras'
-DRIVE_FILE_ID = '1TJwx7F4ZS-ZEs8EPjkZCpplJjrsKIGUo'
 
-if not os.path.exists(MODEL_PATH):
-    with st.spinner("Downloading model... (first load only, ~60 seconds)"):
-        gdown.download(id=DRIVE_FILE_ID, output=MODEL_PATH, quiet=False)
-
-# ── Load model ─────────────────────────────────────────────
 @st.cache_resource
 def get_model():
+    # Automatically loads local file pushed via Git LFS
     model = load_model(MODEL_PATH)
     return model
 
@@ -39,25 +33,20 @@ class_names = ['No Pneumonia', 'Yes Pneumonia']
 # ── Grad-CAM ───────────────────────────────────────────────
 @st.cache_resource
 def cached_grad_model():
-    vgg_submodel = model.get_layer('vgg16')
-    flat_input = vgg_submodel.input
-    flat_vgg_output = vgg_submodel.output
-
-    # Dynamic layer names — works regardless of Keras auto-numbering
-    extra_layers = [
-        l for l in model.layers
-        if isinstance(l, (tf.keras.layers.Flatten, tf.keras.layers.Dense))
-        and 'augmentation' not in l.name
-    ]
-
-    x = flat_vgg_output
-    for layer in extra_layers:
-        x = layer(x)
-
-    flat_model = tf.keras.models.Model(inputs=flat_input, outputs=x)
+    """
+    Safely isolates the feature extraction layer (block5_conv3) 
+    and output layers directly from the compiled top-level functional model.
+    """
+    # 1. Target the final convolutional layer of the VGG16 backbone
+    # (Since it's nested inside the sequential/functional wrapper, we find it safely)
+    vgg_backbone = model.get_layer('vgg16')
+    target_layer = vgg_backbone.get_layer('block5_conv3')
+    
+    # 2. Build a new functional wrapper map using the top-level inputs 
+    # to yield both the activation maps and the final classification head outputs
     grad_model = tf.keras.models.Model(
-        inputs=flat_model.input,
-        outputs=[flat_model.get_layer('block5_conv3').output, flat_model.output]
+        inputs=model.inputs,
+        outputs=[target_layer.output, model.output]
     )
     return grad_model
 
@@ -69,11 +58,15 @@ def make_gradcam_heatmap(img_array, grad_model, pred_index=None):
             pred_index = tf.argmax(predictions[0])
         class_channel = predictions[:, pred_index]
 
+    # Compute gradients with respect to target feature map
     grads = tape.gradient(class_channel, conv_outputs)
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+    
     conv_outputs = conv_outputs[0]
     heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
     heatmap = tf.squeeze(heatmap)
+    
+    # ReLU-like gating of features
     heatmap = tf.maximum(heatmap, 0) / (tf.math.reduce_max(heatmap) + 1e-8)
     return heatmap.numpy(), int(pred_index), predictions.numpy()[0]
 
