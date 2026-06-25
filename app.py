@@ -3,6 +3,7 @@
 # ============================================================
 
 import os
+import gdown
 import streamlit as st
 import numpy as np
 import tensorflow as tf
@@ -20,35 +21,35 @@ st.set_page_config(
     layout="centered"
 )
 
-# ── Load model directly from repo ──────────────────────────
+# ── Load model from Google Drive ───────────────────────────
 MODEL_PATH = 'pneumonia_model.keras'
+FILE_ID = "1TJwx7F4ZS-ZEs8EPjkZCpplJjrsKIGUo"
 
 @st.cache_resource
 def get_model():
     """
-    Safely builds the exact model architecture natively and attaches the 
-    trained weights to bypass the cross-version functional deserialization error.
+    Downloads model from Google Drive if not present, then loads it.
+    Falls back to manual architecture reconstruction if direct load fails.
     """
+    if not os.path.exists(MODEL_PATH):
+        with st.spinner("Downloading model from Google Drive (56 MB)..."):
+            gdown.download(
+                f"https://drive.google.com/uc?id={FILE_ID}",
+                MODEL_PATH,
+                quiet=False
+            )
+
     try:
-        # Strategy A: Try a straightforward load if Keras can handle it natively
+        # Strategy A: straightforward load
         return load_model(MODEL_PATH, compile=False)
     except Exception:
-        # Strategy B: Reconstruct the identical pipeline and slide the weights in
-        # 1. Define input matching your exact configuration shape [None, 150, 150, 3]
+        # Strategy B: reconstruct architecture and load weights
         inputs = Input(shape=(150, 150, 3), name="input_layer_20")
-        
-        # 2. Build the exact VGG16 backbone structure used during training
         vgg_base = VGG16(weights=None, include_top=False, input_shape=(150, 150, 3))
-        
-        # 3. Re-link the sequential connections matching your config log
         x = vgg_base(inputs, training=False)
         x = Flatten(name="flatten_6")(x)
         outputs = Dense(2, activation="softmax", name="dense_6")(x)
-        
-        # 4. Instantiate the structural functional model blueprint
         native_model = Model(inputs=inputs, outputs=outputs)
-        
-        # 5. Extract and load the structural weights map directly from the file
         native_model.load_weights(MODEL_PATH, by_name=True, skip_mismatch=True)
         return native_model
 
@@ -60,13 +61,11 @@ class_names = ['No Pneumonia', 'Yes Pneumonia']
 @st.cache_resource
 def cached_grad_model():
     """
-    Safely isolates the internal feature extraction layer (block5_conv3)
-    and the final output of the VGG16 backbone model itself.
+    Isolates the internal feature extraction layer (block5_conv3)
+    from the VGG16 backbone for Grad-CAM visualization.
     """
     vgg_backbone = model.get_layer('vgg16')
     target_layer = vgg_backbone.get_layer('block5_conv3')
-    
-    # Construct the model strictly using the backbone's local graph boundaries
     vgg_grad_model = tf.keras.models.Model(
         inputs=vgg_backbone.inputs,
         outputs=[target_layer.output, vgg_backbone.output]
@@ -75,35 +74,23 @@ def cached_grad_model():
 
 
 def make_gradcam_heatmap(img_array, grad_model, pred_index=None):
-    # Retrieve the top-level layers from our manual architecture
     flatten_layer = model.get_layer('flatten_6')
     dense_layer = model.get_layer('dense_6')
 
     with tf.GradientTape() as tape:
-        # 1. Forward pass through the backbone to get feature maps
         conv_outputs, vgg_output = grad_model(img_array)
-        
-        # 2. Forward pass through the rest of the classification head manually
-        # This keeps the symbolic gradient path unbroken across sub-graphs!
         x = flatten_layer(vgg_output)
         predictions = dense_layer(x)
-        
+
         if pred_index is None:
             pred_index = tf.argmax(predictions[0])
         class_channel = predictions[:, pred_index]
 
-    # Compute gradients of the class score with respect to target conv layer activations
     grads = tape.gradient(class_channel, conv_outputs)
-    
-    # Global average pooling of the gradients
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-    
-    # Weight the channels by the pooled gradients
     conv_outputs = conv_outputs[0]
     heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
     heatmap = tf.squeeze(heatmap)
-    
-    # Apply ReLU gating and normalization
     heatmap = tf.maximum(heatmap, 0) / (tf.math.reduce_max(heatmap) + 1e-8)
     return heatmap.numpy(), int(pred_index), predictions.numpy()[0]
 
